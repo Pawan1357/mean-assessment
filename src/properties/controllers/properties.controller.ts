@@ -1,8 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
-import {
-  SaveAsVersionDto,
-  SavePropertyVersionDto,
-} from '../dto/property.dto';
+import { SaveAsVersionDto } from '../dto/save-as-version.dto';
+import { SavePropertyVersionDto } from '../dto/save-property-version.dto';
 import { PropertiesService } from '../services/properties.service';
 
 @Controller('properties')

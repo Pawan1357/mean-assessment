@@ -1,14 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { BrokerDto, UpsertBrokerDto } from '../../brokers/dto/broker.dto';
 import { AppException } from '../../common/exceptions/app.exception';
-import {
-  BrokerDto,
-  SaveAsVersionDto,
-  SavePropertyVersionDto,
-  TenantDto,
-  UpsertBrokerDto,
-  UpsertTenantDto,
-} from '../dto/property.dto';
+import { TenantDto, UpsertTenantDto } from '../../tenants/dto/tenant.dto';
+import { SaveAsVersionDto } from '../dto/save-as-version.dto';
+import { SavePropertyVersionDto } from '../dto/save-property-version.dto';
 import { AuditLogRepository } from '../repositories/audit-log.repository';
 import { PropertyRepository } from '../repositories/property.repository';
 import { buildDiff } from '../utils/diff.util';

@@ -1,14 +1,3 @@
-export interface Broker {
-  id: string;
-  name: string;
-  phone: string;
-  email: string;
-  company: string;
-  isDeleted: boolean;
-  deletedAt?: string;
-  deletedBy?: string;
-}
-
 export interface Tenant {
   id: string;
   tenantName: string;
@@ -27,12 +16,4 @@ export interface Tenant {
   isDeleted: boolean;
   deletedAt?: string;
   deletedBy?: string;
-}
-
-export interface PropertyVersionProjection {
-  propertyId: string;
-  version: string;
-  revision: number;
-  isLatest: boolean;
-  isHistorical: boolean;
 }

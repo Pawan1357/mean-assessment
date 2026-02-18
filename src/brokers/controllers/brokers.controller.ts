@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, HttpCode, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
-import { UpsertBrokerDto } from '../../properties/dto/property.dto';
+import { UpsertBrokerDto } from '../dto/broker.dto';
 import { BrokersService } from '../services/brokers.service';
 
 @Controller('properties')

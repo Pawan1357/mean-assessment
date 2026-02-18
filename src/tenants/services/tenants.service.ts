@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { UpsertTenantDto } from '../../properties/dto/property.dto';
+import { UpsertTenantDto } from '../dto/tenant.dto';
 import { PropertiesService } from '../../properties/services/properties.service';
 
 @Injectable()
