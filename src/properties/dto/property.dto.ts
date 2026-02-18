@@ -298,6 +298,28 @@ export class SaveAsVersionDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PropertyDetailsDto)
+  propertyDetails?: PropertyDetailsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UnderwritingInputsDto)
+  underwritingInputs?: UnderwritingInputsDto;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BrokerDto)
+  brokers?: BrokerDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TenantDto)
+  tenants?: TenantDto[];
 }
 
 export class UpsertBrokerDto {

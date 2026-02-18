@@ -98,6 +98,7 @@ export class PropertiesService {
       throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
     }
 
+    const saveAsSnapshot = this.resolveSaveAsSnapshot(source, dto);
     const nextVersion = await this.resolveNextVersion(propertyId);
     await this.propertyRepository.markLatestAsHistorical(propertyId);
 
@@ -107,10 +108,10 @@ export class PropertiesService {
       isLatest: true,
       isHistorical: false,
       revision: 0,
-      propertyDetails: source.propertyDetails,
-      underwritingInputs: source.underwritingInputs,
-      brokers: source.brokers,
-      tenants: source.tenants,
+      propertyDetails: saveAsSnapshot.propertyDetails,
+      underwritingInputs: saveAsSnapshot.underwritingInputs,
+      brokers: saveAsSnapshot.brokers,
+      tenants: saveAsSnapshot.tenants,
       updatedBy: MOCK_USER,
     });
 
@@ -125,6 +126,45 @@ export class PropertiesService {
     });
 
     return created.toObject();
+  }
+
+  private resolveSaveAsSnapshot(source: any, dto: SaveAsVersionDto) {
+    const hasAnyDraftFields = !!(dto.propertyDetails || dto.underwritingInputs || dto.brokers || dto.tenants);
+    if (!hasAnyDraftFields) {
+      return {
+        propertyDetails: source.propertyDetails,
+        underwritingInputs: source.underwritingInputs,
+        brokers: source.brokers,
+        tenants: source.tenants,
+      };
+    }
+
+    if (!dto.propertyDetails || !dto.underwritingInputs || !dto.brokers || !dto.tenants) {
+      throw new AppException(
+        'Save As with form changes requires propertyDetails, underwritingInputs, brokers and tenants',
+        'VALIDATION',
+      );
+    }
+
+    if (source.propertyDetails.address !== dto.propertyDetails.address) {
+      throw new AppException('Property address is read-only', 'VALIDATION');
+    }
+
+    this.validateSavePayloadIntegrity(dto.brokers, dto.tenants);
+    const normalizedTenants = this.normalizeTenants(dto.tenants, dto.propertyDetails.buildingSizeSf);
+    this.validateBusinessRules(
+      dto.propertyDetails.buildingSizeSf,
+      dto.underwritingInputs.estStartDate,
+      dto.underwritingInputs.holdPeriodYears,
+      normalizedTenants,
+    );
+
+    return {
+      propertyDetails: dto.propertyDetails,
+      underwritingInputs: dto.underwritingInputs,
+      brokers: this.normalizeBrokers(dto.brokers),
+      tenants: normalizedTenants,
+    };
   }
 
   private async resolveNextVersion(propertyId: string): Promise<string> {

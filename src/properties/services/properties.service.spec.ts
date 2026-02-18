@@ -225,6 +225,45 @@ describe('PropertiesService', () => {
     await expect(service.saveAsNextVersion('property-1', '1.1', { expectedRevision: 1 })).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
+  it('save-as can create new version from unsaved draft payload without mutating current version', async () => {
+    propertyRepository.findOne.mockResolvedValue(baseEntity);
+    propertyRepository.listVersions.mockResolvedValue([{ version: '1.1' }]);
+    propertyRepository.create.mockResolvedValue({
+      toObject: () => ({
+        ...baseEntity,
+        version: '1.2',
+        revision: 0,
+        propertyDetails: { ...baseEntity.propertyDetails, market: 'Draft Market' },
+      }),
+    });
+
+    const result = await service.saveAsNextVersion('property-1', '1.1', {
+      expectedRevision: 2,
+      propertyDetails: { ...baseEntity.propertyDetails, market: 'Draft Market' },
+      underwritingInputs: { ...baseEntity.underwritingInputs },
+      brokers: [...baseEntity.brokers],
+      tenants: baseEntity.tenants.map((tenant: any) => ({ ...tenant })),
+    } as any);
+
+    expect(result.version).toBe('1.2');
+    expect(propertyRepository.saveCurrentVersionAtomic).not.toHaveBeenCalled();
+    expect(propertyRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyDetails: expect.objectContaining({ market: 'Draft Market' }),
+      }),
+    );
+  });
+
+  it('save-as rejects partial draft payload', async () => {
+    propertyRepository.findOne.mockResolvedValue(baseEntity);
+    await expect(
+      service.saveAsNextVersion('property-1', '1.1', {
+        expectedRevision: 2,
+        propertyDetails: { ...baseEntity.propertyDetails },
+      } as any),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
   it('creates and updates brokers', async () => {
     propertyRepository.findOne.mockResolvedValue(baseEntity);
     propertyRepository.saveCurrentVersionAtomic.mockResolvedValue({ revision: 3, toObject: () => ({ ...baseEntity, revision: 3 }) });
