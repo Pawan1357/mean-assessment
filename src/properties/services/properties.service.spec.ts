@@ -206,11 +206,17 @@ describe('PropertiesService', () => {
 
   it('save-as clones next semantic version', async () => {
     propertyRepository.findOne.mockResolvedValue(baseEntity);
-    propertyRepository.create.mockResolvedValue({ toObject: () => ({ ...baseEntity, version: '1.2', revision: 0 }) });
+    propertyRepository.listVersions.mockResolvedValue([
+      { version: '1.1' },
+      { version: '1.3' },
+      { version: '1.2' },
+    ]);
+    propertyRepository.create.mockResolvedValue({ toObject: () => ({ ...baseEntity, version: '1.4', revision: 0 }) });
 
     const result = await service.saveAsNextVersion('property-1', '1.1', { expectedRevision: 2 });
-    expect(result.version).toBe('1.2');
+    expect(result.version).toBe('1.4');
     expect(propertyRepository.markLatestAsHistorical).toHaveBeenCalledWith('property-1');
+    expect(propertyRepository.create).toHaveBeenCalledWith(expect.objectContaining({ version: '1.4' }));
     expect(auditRepository.create).toHaveBeenCalledWith(expect.objectContaining({ action: 'SAVE_AS' }));
   });
 

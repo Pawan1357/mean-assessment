@@ -98,7 +98,7 @@ export class PropertiesService {
       throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
     }
 
-    const nextVersion = incrementSemanticVersion(source.version);
+    const nextVersion = await this.resolveNextVersion(propertyId);
     await this.propertyRepository.markLatestAsHistorical(propertyId);
 
     const created = await this.propertyRepository.create({
@@ -125,6 +125,38 @@ export class PropertiesService {
     });
 
     return created.toObject();
+  }
+
+  private async resolveNextVersion(propertyId: string): Promise<string> {
+    const versions = await this.propertyRepository.listVersions(propertyId);
+    if (versions.length === 0) {
+      throw new AppException('Cannot create next version for unknown property', 'NOT_FOUND');
+    }
+
+    let latestVersion = versions[0].version;
+    let latestScore = this.semanticVersionScore(latestVersion);
+
+    for (const candidate of versions.slice(1)) {
+      const candidateScore = this.semanticVersionScore(candidate.version);
+      if (candidateScore > latestScore) {
+        latestScore = candidateScore;
+        latestVersion = candidate.version;
+      }
+    }
+
+    return incrementSemanticVersion(latestVersion);
+  }
+
+  private semanticVersionScore(version: string): number {
+    const [majorRaw, minorRaw] = version.split('.');
+    const major = Number(majorRaw);
+    const minor = Number(minorRaw);
+
+    if (Number.isNaN(major) || Number.isNaN(minor)) {
+      throw new AppException(`Invalid version format: ${version}`, 'VALIDATION');
+    }
+
+    return major * 100000 + minor;
   }
 
   async createBroker(propertyId: string, version: string, expectedRevision: number, dto: UpsertBrokerDto) {

@@ -78,10 +78,26 @@ export class ApiExceptionFilter implements ExceptionFilter {
       };
     }
 
+    if (this.isMongoDuplicateKeyError(exception)) {
+      return {
+        statusCode: HttpStatus.CONFLICT,
+        message: 'Version already exists. Reload versions and retry.',
+        errorCode: 'CONFLICT',
+      };
+    }
+
     return {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       message: 'Internal server error',
       errorCode: 'INTERNAL_SERVER_ERROR',
     };
+  }
+
+  private isMongoDuplicateKeyError(exception: unknown): boolean {
+    if (typeof exception !== 'object' || exception === null) {
+      return false;
+    }
+    const candidate = exception as { code?: unknown };
+    return candidate.code === 11000;
   }
 }

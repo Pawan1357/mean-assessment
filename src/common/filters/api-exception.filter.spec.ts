@@ -51,4 +51,14 @@ describe('ApiExceptionFilter', () => {
     expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
     expect(json).toHaveBeenCalledWith(expect.objectContaining({ success: false, errorCode: 'INTERNAL_SERVER_ERROR' }));
   });
+
+  it('maps mongo duplicate key errors to conflict response', () => {
+    const filter = new ApiExceptionFilter();
+    const { host, status, json } = createHost();
+
+    filter.catch({ code: 11000 }, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ success: false, errorCode: 'CONFLICT' }));
+  });
 });
