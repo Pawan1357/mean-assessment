@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-import { BrokerDto, UpsertBrokerDto } from '../../brokers/dto/broker.dto';
+import { BrokerDto } from '../../brokers/dto/broker.dto';
 import { AppException } from '../../common/exceptions/app.exception';
-import { TenantDto, UpsertTenantDto } from '../../tenants/dto/tenant.dto';
+import { TenantDto } from '../../tenants/dto/tenant.dto';
 import { SaveAsVersionDto } from '../dto/save-as-version.dto';
 import { SavePropertyVersionDto } from '../dto/save-property-version.dto';
 import { AuditLogRepository } from '../repositories/audit-log.repository';
@@ -195,102 +194,6 @@ export class PropertiesService {
     return major * 100000 + minor;
   }
 
-  async createBroker(propertyId: string, version: string, expectedRevision: number, dto: UpsertBrokerDto) {
-    const entity = await this.assertEditableVersion(propertyId, version);
-    this.assertRevision(entity.revision, expectedRevision);
-
-    const brokers = [...entity.brokers, { ...dto, id: randomUUID(), isDeleted: false }];
-    return this.updateBrokersWithAudit(entity, brokers, 'BROKER_CREATE');
-  }
-
-  async updateBroker(propertyId: string, version: string, brokerId: string, expectedRevision: number, dto: UpsertBrokerDto) {
-    const entity = await this.assertEditableVersion(propertyId, version);
-    this.assertRevision(entity.revision, expectedRevision);
-    this.assertBrokerMutable(entity.brokers, brokerId, 'update');
-
-    const brokers = entity.brokers.map((broker: BrokerDto) => (broker.id === brokerId ? { ...broker, ...dto } : broker));
-    return this.updateBrokersWithAudit(entity, brokers, 'BROKER_UPDATE');
-  }
-
-  async softDeleteBroker(propertyId: string, version: string, brokerId: string, expectedRevision: number) {
-    const entity = await this.assertEditableVersion(propertyId, version);
-    this.assertRevision(entity.revision, expectedRevision);
-    this.assertBrokerMutable(entity.brokers, brokerId, 'delete');
-
-    const now = new Date().toISOString();
-    const brokers = entity.brokers.map((broker: BrokerDto) =>
-      broker.id === brokerId
-        ? {
-            ...broker,
-            isDeleted: true,
-            deletedAt: now,
-            deletedBy: MOCK_USER,
-          }
-        : broker,
-    );
-    return this.updateBrokersWithAudit(entity, brokers, 'BROKER_DELETE_SOFT');
-  }
-
-  async createTenant(propertyId: string, version: string, expectedRevision: number, dto: UpsertTenantDto) {
-    const entity = await this.assertEditableVersion(propertyId, version);
-    this.assertRevision(entity.revision, expectedRevision);
-
-    const tenants = [...entity.tenants.filter((t: TenantDto) => !t.isVacant), { ...dto, id: randomUUID(), isVacant: false, isDeleted: false }];
-    return this.updateTenantsForEditableVersion(entity, tenants, 'TENANT_CREATE');
-  }
-
-  async updateTenant(propertyId: string, version: string, tenantId: string, expectedRevision: number, dto: UpsertTenantDto) {
-    const entity = await this.assertEditableVersion(propertyId, version);
-    this.assertRevision(entity.revision, expectedRevision);
-    this.assertTenantMutable(entity.tenants, tenantId, 'update');
-
-    const tenants = entity.tenants
-      .filter((t: TenantDto) => !t.isVacant)
-      .map((tenant: TenantDto) => (tenant.id === tenantId ? { ...tenant, ...dto } : tenant));
-
-    return this.updateTenantsForEditableVersion(entity, tenants, 'TENANT_UPDATE');
-  }
-
-  async softDeleteTenant(propertyId: string, version: string, tenantId: string, expectedRevision: number) {
-    const entity = await this.assertEditableVersion(propertyId, version);
-    this.assertRevision(entity.revision, expectedRevision);
-    this.assertTenantMutable(entity.tenants, tenantId, 'delete');
-
-    const now = new Date().toISOString();
-    const tenants = entity.tenants
-      .filter((t: TenantDto) => !t.isVacant)
-      .map((tenant: TenantDto) =>
-        tenant.id === tenantId
-          ? {
-              ...tenant,
-              isDeleted: true,
-              deletedAt: now,
-              deletedBy: MOCK_USER,
-            }
-          : tenant,
-      );
-
-    return this.updateTenantsForEditableVersion(entity, tenants, 'TENANT_DELETE_SOFT');
-  }
-
-  private async updateTenantsForEditableVersion(entity: any, tenants: TenantDto[], action: string) {
-    const normalized = this.normalizeTenants(tenants, entity.propertyDetails.buildingSizeSf);
-    this.validateBusinessRules(
-      entity.propertyDetails.buildingSizeSf,
-      entity.underwritingInputs.estStartDate,
-      entity.underwritingInputs.holdPeriodYears,
-      normalized,
-    );
-
-    return this.updateTenantsWithAudit(entity, normalized, action);
-  }
-
-  private assertRevision(currentRevision: number, expectedRevision: number) {
-    if (currentRevision !== expectedRevision) {
-      throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
-    }
-  }
-
   private validateBusinessRules(buildingSizeSf: number, estStartDate: string, holdPeriodYears: number, tenants: TenantDto[]) {
     const activeTenants = tenants.filter((tenant) => !tenant.isVacant && !tenant.isDeleted);
     const totalSqFt = activeTenants.reduce((sum, tenant) => sum + tenant.squareFeet, 0);
@@ -337,33 +240,6 @@ export class PropertiesService {
     }
   }
 
-  private assertBrokerMutable(brokers: BrokerDto[], brokerId: string, operation: 'update' | 'delete') {
-    const broker = brokers.find((candidate) => candidate.id === brokerId);
-    if (!broker) {
-      throw new AppException('Broker not found', 'NOT_FOUND');
-    }
-    if (broker.isDeleted) {
-      throw new AppException(`Cannot ${operation} a soft-deleted broker`, 'VALIDATION');
-    }
-  }
-
-  private assertTenantMutable(tenants: TenantDto[], tenantId: string, operation: 'update' | 'delete') {
-    if (tenantId === VACANT_TENANT_ID) {
-      throw new AppException('Vacant row is system-managed and cannot be modified directly', 'VALIDATION');
-    }
-
-    const tenant = tenants.find((candidate) => candidate.id === tenantId);
-    if (!tenant) {
-      throw new AppException('Tenant not found', 'NOT_FOUND');
-    }
-    if (tenant.isVacant) {
-      throw new AppException('Vacant row is system-managed and cannot be modified directly', 'VALIDATION');
-    }
-    if (tenant.isDeleted) {
-      throw new AppException(`Cannot ${operation} a soft-deleted tenant`, 'VALIDATION');
-    }
-  }
-
   private normalizeTenants(tenants: TenantDto[], propertySf: number) {
     const activeRows = tenants.filter((tenant) => !tenant.isVacant).map((tenant) => ({ ...tenant }));
     const occupiedSf = activeRows.filter((tenant) => !tenant.isDeleted).reduce((sum, tenant) => sum + tenant.squareFeet, 0);
@@ -401,51 +277,4 @@ export class PropertiesService {
     return entity;
   }
 
-  private async updateBrokersWithAudit(entity: any, brokers: BrokerDto[], action: string) {
-    const updated = await this.propertyRepository.saveCurrentVersionAtomic(entity.propertyId, entity.version, entity.revision, {
-      brokers,
-      updatedBy: MOCK_USER,
-    });
-
-    if (!updated) {
-      throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
-    }
-
-    const changes = buildDiff({ brokers: entity.brokers }, { brokers });
-    await this.auditRepository.create({
-      propertyId: entity.propertyId,
-      version: entity.version,
-      revision: updated.revision,
-      updatedBy: MOCK_USER,
-      action,
-      changes,
-      changedFieldCount: changes.length,
-    });
-
-    return updated.toObject();
-  }
-
-  private async updateTenantsWithAudit(entity: any, tenants: TenantDto[], action: string) {
-    const updated = await this.propertyRepository.saveCurrentVersionAtomic(entity.propertyId, entity.version, entity.revision, {
-      tenants,
-      updatedBy: MOCK_USER,
-    });
-
-    if (!updated) {
-      throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
-    }
-
-    const changes = buildDiff({ tenants: entity.tenants }, { tenants });
-    await this.auditRepository.create({
-      propertyId: entity.propertyId,
-      version: entity.version,
-      revision: updated.revision,
-      updatedBy: MOCK_USER,
-      action,
-      changes,
-      changedFieldCount: changes.length,
-    });
-
-    return updated.toObject();
-  }
 }

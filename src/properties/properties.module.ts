@@ -17,6 +17,6 @@ import { AuditLog, AuditLogSchema } from './schemas/audit-log.schema';
   ],
   controllers: [PropertiesController],
   providers: [PropertiesService, PropertySeedService, PropertyRepository, AuditLogRepository],
-  exports: [PropertiesService],
+  exports: [PropertiesService, PropertyRepository, AuditLogRepository],
 })
 export class PropertiesModule {}
