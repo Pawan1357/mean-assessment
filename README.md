@@ -1,79 +1,186 @@
 # Assessment Backend (NestJS + MongoDB)
 
-## Purpose
+## Overview
 
-Versioned property underwriting API for the assessment.  
-Focus areas: strict REST resources, strong server validation, optimistic locking, immutable history, and auditability.
+Backend API for versioned property underwriting.
 
-## Current Architecture
+Core capabilities:
 
-- `src/app.module.ts`: app composition, config, Mongo connection.
-- `src/properties`: version workflows, save/save-as, audit, persistence.
-- `src/brokers`: broker controller/service + broker DTO/interface.
-- `src/tenants`: tenant controller/service + tenant DTO/interface.
-- `src/common`: exception model, response envelope, request/response logging.
+- strict REST resources
+- semantic versioning (`Save As`: `1.1 -> 1.2`)
+- immutable historical versions
+- optimistic locking (`expectedRevision`)
+- soft delete for brokers and tenants
+- field-level audit logging
+- standardized success/error response envelopes
 
-Key design choice:
+## Tech Stack
 
-- Broker and tenant endpoints are split into dedicated modules for separation at API boundary.
-- Version lifecycle and cross-aggregate business rules stay centralized in `PropertiesService` to keep invariants consistent.
+- NestJS 10
+- Mongoose 8
+- MongoDB
+- class-validator + class-transformer
 
-## Behavior Implemented
+## Project Structure
 
-- `Save` updates selected editable version only.
-- `Save As` creates next semantic version (`1.1 -> 1.2`) using current form snapshot.
-- Historical versions are read-only.
-- Optimistic locking via `expectedRevision`.
-- Soft delete for brokers and tenants.
-- Vacant tenant row is system-managed and persisted.
-- Field-level audit logs with old/new values, action, revision, actor.
-- Generic success/error response envelope for all APIs.
-- Incoming/outgoing API logging for debugging.
+- `src/app.module.ts`: app composition and Mongo connection
+- `src/main.ts`: global prefix, CORS, validation pipe, interceptors, exception filter
+- `src/properties`: version lifecycle, save/save-as workflows, audit, seed, property persistence
+- `src/brokers`: broker row APIs and business logic
+- `src/tenants`: tenant row APIs and business logic
+- `src/common`: shared exception model, response interfaces, logging/response interceptors, exception filter
 
-## API Summary
+## Database Design
 
-Base: `http://localhost:3000/api`
+This backend stores each concern in its own collection.
 
-- `GET /properties/:propertyId/versions`
-- `GET /properties/:propertyId/versions/:version`
-- `PUT /properties/:propertyId/versions/:version`
-- `POST /properties/:propertyId/versions/:version/save-as`
-- `GET /properties/:propertyId/versions/:version/audit-logs`
-- `POST /properties/:propertyId/versions/:version/brokers?expectedRevision={n}`
-- `PUT /properties/:propertyId/versions/:version/brokers/:brokerId?expectedRevision={n}`
-- `DELETE /properties/:propertyId/versions/:version/brokers/:brokerId?expectedRevision={n}`
-- `POST /properties/:propertyId/versions/:version/tenants?expectedRevision={n}`
-- `PUT /properties/:propertyId/versions/:version/tenants/:tenantId?expectedRevision={n}`
-- `DELETE /properties/:propertyId/versions/:version/tenants/:tenantId?expectedRevision={n}`
+Collections:
 
-Detailed examples: `../docs/API.md`  
-Postman collection: `../docs/postman/FinalAssessment2.postman_collection.json`
+- `property_versions`
+- `brokers`
+- `tenants`
+- `audit_logs`
 
-## Local Run
+Relationship model:
 
-1. Ensure MongoDB is running.
-2. `npm install`
-3. `npm run start:dev`
+- `property_versions` row is the parent snapshot for one `(propertyId, version)`
+- `brokers.propertyVersionId -> property_versions._id`
+- `tenants.propertyVersionId -> property_versions._id`
+- broker/tenant rows also keep `propertyId` and `version` for traceability
 
-Defaults:
+Important indexes:
 
-- `PORT=3000`
+- `property_versions`: unique `{ propertyId, version }`
+- `brokers`: unique `{ propertyVersionId, id }`
+- `tenants`: unique `{ propertyVersionId, id }`
+
+## API Base URL
+
+- Local: `http://localhost:3000/api`
+- Resource root: `/properties`
+
+## Response Contract
+
+Success shape:
+
+```json
+{
+  "success": true,
+  "message": "Request processed successfully",
+  "path": "/api/properties/property-1/versions/1.1",
+  "timestamp": "2026-02-19T10:00:00.000Z",
+  "data": {}
+}
+```
+
+Error shape:
+
+```json
+{
+  "success": false,
+  "message": "Revision mismatch detected. Reload latest data.",
+  "errorCode": "CONFLICT",
+  "statusCode": 409,
+  "path": "/api/properties/property-1/versions/1.1",
+  "timestamp": "2026-02-19T10:00:00.000Z",
+  "details": {}
+}
+```
+
+## APIs
+
+### Property Version APIs
+
+1. `GET /properties/:propertyId/versions`
+2. `GET /properties/:propertyId/versions/:version`
+3. `PUT /properties/:propertyId/versions/:version`
+4. `POST /properties/:propertyId/versions/:version/save-as`
+5. `GET /properties/:propertyId/versions/:version/audit-logs`
+
+### Broker Row APIs
+
+1. `POST /properties/:propertyId/versions/:version/brokers?expectedRevision={n}`
+2. `PUT /properties/:propertyId/versions/:version/brokers/:brokerId?expectedRevision={n}`
+3. `DELETE /properties/:propertyId/versions/:version/brokers/:brokerId?expectedRevision={n}`
+
+### Tenant Row APIs
+
+1. `POST /properties/:propertyId/versions/:version/tenants?expectedRevision={n}`
+2. `PUT /properties/:propertyId/versions/:version/tenants/:tenantId?expectedRevision={n}`
+3. `DELETE /properties/:propertyId/versions/:version/tenants/:tenantId?expectedRevision={n}`
+
+Detailed API examples:
+
+- `../docs/API.md`
+- Postman: `../docs/postman/FinalAssessment2.postman_collection.json`
+
+## Business Flow
+
+### Initial Load
+
+1. Client calls `GET /versions` to get available versions.
+2. Client loads selected version with `GET /versions/:version`.
+3. API returns one merged snapshot containing `propertyDetails`, `underwritingInputs`, `brokers`, `tenants`.
+
+### Main Save
+
+1. Client sends full payload to `PUT /versions/:version`.
+2. Backend validates DTO and business rules atomically.
+3. Backend applies optimistic lock with `expectedRevision`.
+4. Backend updates property version and replaces broker/tenant rows for that version.
+5. Backend computes field diffs and writes audit log.
+
+### Save As
+
+1. Client posts current form snapshot to `POST /save-as`.
+2. Backend verifies source revision.
+3. Backend marks current latest as historical.
+4. Backend creates next semantic version and persists related brokers/tenants.
+5. Backend writes `SAVE_AS` audit entry.
+
+### Row Save/Delete (Broker/Tenant)
+
+1. Client calls row API with `expectedRevision`.
+2. Backend validates target version is editable (non-historical).
+3. Backend updates/soft-deletes row collection record(s).
+4. Backend bumps revision on property version and logs audit diff.
+
+## Key Rules Enforced
+
+- historical versions are read-only
+- property address is read-only
+- save-as uses form snapshot and creates new version
+- delete is soft delete only
+- vacant tenant row is system-managed
+- tenant/business lease rules validated server-side
+- payloads rejected on any validation failure
+
+## Local Setup
+
+1. Start MongoDB.
+2. Install deps:
+   - `npm install`
+3. Start backend:
+   - `npm run start:dev`
+
+Default env:
+
 - `MONGODB_URI=mongodb://localhost:27017/assessment`
+- `PORT=3000`
 
-## Test and Coverage
+## Seed Data
 
-- Unit tests with coverage: `npm test`
-- E2E tests: `npm run test:e2e`
+- On startup, `PropertySeedService` seeds `property-1` version `1.1` if missing.
+- Seed includes property details, underwriting inputs, initial broker, tenants, and vacant row.
+
+## Test Commands
+
 - Build: `npm run build`
+- Unit tests + coverage: `npm test`
+- E2E tests: `npm run test:e2e`
 
-Current backend unit test status in this workspace:
+## Assumptions
 
-- Unit tests pass.
-- Coverage is high (>90% statements/lines/functions), branch coverage lower in a few complex paths.
-
-## Seed and Assumptions
-
-- Startup seed creates `property-1` at version `1.1` when missing.
-- Single-user assessment mode: `mock.user@assessment.local`.
-- AuthN/AuthZ is out of scope.
-- Backend is source of truth for validation and business rules.
+- single-user mock mode with fixed actor: `mock.user@assessment.local`
+- authentication/authorization is out of scope for assessment
+- frontend is expected to still send full payload on main save
