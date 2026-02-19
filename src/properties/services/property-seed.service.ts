@@ -1,9 +1,15 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import { BrokerRepository } from '../../brokers/repositories/broker.repository';
+import { TenantRepository } from '../../tenants/repositories/tenant.repository';
 import { PropertyRepository } from '../repositories/property.repository';
 
 @Injectable()
 export class PropertySeedService implements OnModuleInit {
-  constructor(private readonly propertyRepository: PropertyRepository) {}
+  constructor(
+    private readonly propertyRepository: PropertyRepository,
+    private readonly brokerRepository: BrokerRepository,
+    private readonly tenantRepository: TenantRepository,
+  ) {}
 
   async onModuleInit() {
     const existing = await this.propertyRepository.findOne('property-1', '1.1');
@@ -11,7 +17,7 @@ export class PropertySeedService implements OnModuleInit {
       return;
     }
 
-    await this.propertyRepository.create({
+    const created = await this.propertyRepository.create({
       propertyId: 'property-1',
       version: '1.1',
       isLatest: true,
@@ -69,52 +75,54 @@ export class PropertySeedService implements OnModuleInit {
         expenseInflationPct: 0,
         exitCapRate: 0,
       },
-      brokers: [
-        {
-          id: 'broker-1',
-          name: 'Ashay Kandylia',
-          phone: '+1 (555) 867-5309',
-          email: 'example@company.com',
-          company: 'Agile Infoways',
-          isDeleted: false,
-        },
-      ],
-      tenants: [
-        {
-          id: 'tenant-1',
-          tenantName: 'Grandma\'s Pizza',
-          creditType: 'National',
-          squareFeet: 12000,
-          rentPsf: 18,
-          annualEscalations: 5,
-          leaseStart: '2025-10-25',
-          leaseEnd: '2030-12-31',
-          leaseType: 'NNN',
-          renew: 'Yes',
-          downtimeMonths: 2,
-          tiPsf: 7,
-          lcPsf: 2.5,
-          isVacant: false,
-          isDeleted: false,
-        },
-        {
-          id: 'vacant-row',
-          tenantName: 'VACANT',
-          creditType: 'N/A',
-          squareFeet: 78012,
-          rentPsf: 0,
-          annualEscalations: 0,
-          leaseStart: '2025-10-25',
-          leaseEnd: '2030-12-31',
-          leaseType: 'N/A',
-          renew: 'N/A',
-          downtimeMonths: 0,
-          tiPsf: 0,
-          lcPsf: 0,
-          isVacant: true,
-          isDeleted: false,
-        },
-      ],
     });
+
+    await this.brokerRepository.replaceByPropertyVersionId(created._id, 'property-1', '1.1', [
+      {
+        id: 'broker-1',
+        name: 'Ashay Kandylia',
+        phone: '+1 (555) 867-5309',
+        email: 'example@company.com',
+        company: 'Agile Infoways',
+        isDeleted: false,
+      },
+    ] as any);
+
+    await this.tenantRepository.replaceByPropertyVersionId(created._id, 'property-1', '1.1', [
+      {
+        id: 'tenant-1',
+        tenantName: 'Grandma\'s Pizza',
+        creditType: 'National',
+        squareFeet: 12000,
+        rentPsf: 18,
+        annualEscalations: 5,
+        leaseStart: '2025-10-25',
+        leaseEnd: '2030-12-31',
+        leaseType: 'NNN',
+        renew: 'Yes',
+        downtimeMonths: 2,
+        tiPsf: 7,
+        lcPsf: 2.5,
+        isVacant: false,
+        isDeleted: false,
+      },
+      {
+        id: 'vacant-row',
+        tenantName: 'VACANT',
+        creditType: 'N/A',
+        squareFeet: 78012,
+        rentPsf: 0,
+        annualEscalations: 0,
+        leaseStart: '2025-10-25',
+        leaseEnd: '2030-12-31',
+        leaseType: 'N/A',
+        renew: 'N/A',
+        downtimeMonths: 0,
+        tiPsf: 0,
+        lcPsf: 0,
+        isVacant: true,
+        isDeleted: false,
+      },
+    ] as any);
   }
 }

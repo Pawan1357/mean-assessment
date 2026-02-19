@@ -12,7 +12,7 @@ export class TenantsController {
     @Param('version') version: string,
     @Query('expectedRevision', ParseIntPipe) expectedRevision: number,
     @Body() dto: UpsertTenantDto,
-  ) {
+  ): Promise<any> {
     return this.tenantsService.createTenant(propertyId, version, expectedRevision, dto);
   }
 
@@ -23,7 +23,7 @@ export class TenantsController {
     @Param('tenantId') tenantId: string,
     @Query('expectedRevision', ParseIntPipe) expectedRevision: number,
     @Body() dto: UpsertTenantDto,
-  ) {
+  ): Promise<any> {
     return this.tenantsService.updateTenant(propertyId, version, tenantId, expectedRevision, dto);
   }
 
@@ -34,7 +34,7 @@ export class TenantsController {
     @Param('version') version: string,
     @Param('tenantId') tenantId: string,
     @Query('expectedRevision', ParseIntPipe) expectedRevision: number,
-  ) {
+  ): Promise<any> {
     return this.tenantsService.softDeleteTenant(propertyId, version, tenantId, expectedRevision);
   }
 }

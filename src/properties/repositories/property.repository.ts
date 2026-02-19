@@ -23,7 +23,7 @@ export class PropertyRepository {
     return this.model.findOneAndUpdate(
       { propertyId, version, revision: expectedRevision, isHistorical: false },
       { $set: payload, $inc: { revision: 1 } },
-      { new: true },
+      { new: true, runValidators: true, context: 'query' },
     );
   }
 

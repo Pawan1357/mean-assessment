@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { BrokerDto } from '../../brokers/dto/broker.dto';
+import { BrokerRepository } from '../../brokers/repositories/broker.repository';
 import { AppException } from '../../common/exceptions/app.exception';
 import { TenantDto } from '../../tenants/dto/tenant.dto';
+import { TenantRepository } from '../../tenants/repositories/tenant.repository';
 import { SaveAsVersionDto } from '../dto/save-as-version.dto';
 import { SavePropertyVersionDto } from '../dto/save-property-version.dto';
 import { AuditLogRepository } from '../repositories/audit-log.repository';
@@ -17,14 +19,16 @@ export class PropertiesService {
   constructor(
     private readonly propertyRepository: PropertyRepository,
     private readonly auditRepository: AuditLogRepository,
+    private readonly brokerRepository: BrokerRepository,
+    private readonly tenantRepository: TenantRepository,
   ) {}
 
-  async getVersion(propertyId: string, version: string) {
+  async getVersion(propertyId: string, version: string): Promise<any> {
     const entity = await this.propertyRepository.findOne(propertyId, version);
     if (!entity) {
       throw new AppException('Property version not found', 'NOT_FOUND');
     }
-    return entity;
+    return this.composeVersionResponse(entity);
   }
 
   listVersions(propertyId: string) {
@@ -35,8 +39,9 @@ export class PropertiesService {
     return this.auditRepository.list(propertyId, version);
   }
 
-  async saveCurrentVersion(propertyId: string, version: string, dto: SavePropertyVersionDto) {
-    const existing = await this.assertEditableVersion(propertyId, version);
+  async saveCurrentVersion(propertyId: string, version: string, dto: SavePropertyVersionDto): Promise<any> {
+    const existingCore = await this.assertEditableVersion(propertyId, version);
+    const existing = await this.composeVersionResponse(existingCore);
 
     if (existing.propertyDetails.address !== dto.propertyDetails.address) {
       throw new AppException('Property address is read-only', 'VALIDATION');
@@ -44,20 +49,28 @@ export class PropertiesService {
     this.validateSavePayloadIntegrity(dto.brokers, dto.tenants);
 
     const normalizedTenants = this.normalizeTenants(dto.tenants, dto.propertyDetails.buildingSizeSf);
-    this.validateBusinessRules(dto.propertyDetails.buildingSizeSf, dto.underwritingInputs.estStartDate, dto.underwritingInputs.holdPeriodYears, normalizedTenants);
+    this.validateBusinessRules(
+      dto.propertyDetails.buildingSizeSf,
+      dto.underwritingInputs.estStartDate,
+      dto.underwritingInputs.holdPeriodYears,
+      normalizedTenants,
+    );
 
     const payload = {
       propertyDetails: dto.propertyDetails,
       underwritingInputs: dto.underwritingInputs,
-      brokers: this.normalizeBrokers(dto.brokers),
-      tenants: normalizedTenants,
       updatedBy: MOCK_USER,
     };
 
-    const updated = await this.propertyRepository.saveCurrentVersionAtomic(propertyId, version, dto.expectedRevision, payload);
-    if (!updated) {
+    const updatedCore = await this.propertyRepository.saveCurrentVersionAtomic(propertyId, version, dto.expectedRevision, payload);
+    if (!updatedCore) {
       throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
     }
+
+    await this.brokerRepository.replaceByPropertyVersionId(updatedCore._id, propertyId, version, this.normalizeBrokers(dto.brokers) as any);
+    await this.tenantRepository.replaceByPropertyVersionId(updatedCore._id, propertyId, version, normalizedTenants as any);
+
+    const updated = await this.composeVersionResponse(updatedCore);
 
     const changes = buildDiff(
       {
@@ -67,37 +80,41 @@ export class PropertiesService {
         tenants: existing.tenants,
       },
       {
-        propertyDetails: payload.propertyDetails,
-        underwritingInputs: payload.underwritingInputs,
-        brokers: payload.brokers,
-        tenants: payload.tenants,
+        propertyDetails: updated.propertyDetails,
+        underwritingInputs: updated.underwritingInputs,
+        brokers: updated.brokers,
+        tenants: updated.tenants,
       },
     );
 
     await this.auditRepository.create({
       propertyId,
       version,
-      revision: updated.revision,
+      revision: updatedCore.revision,
       updatedBy: MOCK_USER,
       action: 'UPDATE_VERSION',
       changes,
       changedFieldCount: changes.length,
     });
 
-    return updated.toObject();
+    return updated;
   }
 
-  async saveAsNextVersion(propertyId: string, sourceVersion: string, dto: SaveAsVersionDto) {
-    const source = await this.getVersion(propertyId, sourceVersion);
-    if (source.revision !== dto.expectedRevision) {
+  async saveAsNextVersion(propertyId: string, sourceVersion: string, dto: SaveAsVersionDto): Promise<any> {
+    const sourceCore = await this.propertyRepository.findOne(propertyId, sourceVersion);
+    if (!sourceCore) {
+      throw new AppException('Property version not found', 'NOT_FOUND');
+    }
+    if (sourceCore.revision !== dto.expectedRevision) {
       throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
     }
 
+    const source = await this.composeVersionResponse(sourceCore);
     const saveAsSnapshot = this.resolveSaveAsSnapshot(source, dto);
     const nextVersion = await this.resolveNextVersion(propertyId);
     await this.propertyRepository.markLatestAsHistorical(propertyId);
 
-    const created = await this.propertyRepository.create({
+    const createdCore = await this.propertyRepository.create({
       propertyId,
       version: nextVersion,
       isLatest: true,
@@ -105,10 +122,11 @@ export class PropertiesService {
       revision: 0,
       propertyDetails: saveAsSnapshot.propertyDetails,
       underwritingInputs: saveAsSnapshot.underwritingInputs,
-      brokers: saveAsSnapshot.brokers,
-      tenants: saveAsSnapshot.tenants,
       updatedBy: MOCK_USER,
     });
+
+    await this.brokerRepository.replaceByPropertyVersionId(createdCore._id, propertyId, nextVersion, saveAsSnapshot.brokers as any);
+    await this.tenantRepository.replaceByPropertyVersionId(createdCore._id, propertyId, nextVersion, saveAsSnapshot.tenants as any);
 
     await this.auditRepository.create({
       propertyId,
@@ -120,7 +138,22 @@ export class PropertiesService {
       changedFieldCount: 1,
     });
 
-    return created.toObject();
+    return this.composeVersionResponse(createdCore);
+  }
+
+  private async composeVersionResponse(entity: any): Promise<any> {
+    const [brokers, tenants] = await Promise.all([
+      this.brokerRepository.listByPropertyVersionId(entity._id),
+      this.tenantRepository.listByPropertyVersionId(entity._id),
+    ]);
+    const object = typeof entity.toObject === 'function' ? entity.toObject() : entity;
+    const fallbackBrokers = Array.isArray(object.brokers) ? object.brokers : [];
+    const fallbackTenants = Array.isArray(object.tenants) ? object.tenants : [];
+    return {
+      ...object,
+      brokers: brokers.length > 0 ? brokers.map((item) => this.stripMeta(item)) : fallbackBrokers,
+      tenants: tenants.length > 0 ? tenants.map((item) => this.stripMeta(item)) : fallbackTenants,
+    };
   }
 
   private resolveSaveAsSnapshot(source: any, dto: SaveAsVersionDto) {
@@ -229,11 +262,6 @@ export class PropertiesService {
       throw new AppException('Broker IDs must be unique', 'VALIDATION');
     }
 
-    const realTenantIds = tenants.filter((tenant) => !tenant.isVacant).map((tenant) => tenant.id);
-    if (new Set(realTenantIds).size !== realTenantIds.length) {
-      throw new AppException('Tenant IDs must be unique for non-vacant rows', 'VALIDATION');
-    }
-
     const invalidVacantMutations = tenants.filter((tenant) => tenant.id === VACANT_TENANT_ID && !tenant.isVacant);
     if (invalidVacantMutations.length > 0) {
       throw new AppException('Vacant row is system-managed and cannot be modified directly', 'VALIDATION');
@@ -277,4 +305,8 @@ export class PropertiesService {
     return entity;
   }
 
+  private stripMeta(item: any) {
+    const { propertyVersionId, propertyId, version, _id, __v, ...rest } = item;
+    return rest;
+  }
 }

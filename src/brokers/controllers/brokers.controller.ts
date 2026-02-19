@@ -12,7 +12,7 @@ export class BrokersController {
     @Param('version') version: string,
     @Query('expectedRevision', ParseIntPipe) expectedRevision: number,
     @Body() dto: UpsertBrokerDto,
-  ) {
+  ): Promise<any> {
     return this.brokersService.createBroker(propertyId, version, expectedRevision, dto);
   }
 
@@ -23,7 +23,7 @@ export class BrokersController {
     @Param('brokerId') brokerId: string,
     @Query('expectedRevision', ParseIntPipe) expectedRevision: number,
     @Body() dto: UpsertBrokerDto,
-  ) {
+  ): Promise<any> {
     return this.brokersService.updateBroker(propertyId, version, brokerId, expectedRevision, dto);
   }
 
@@ -34,7 +34,7 @@ export class BrokersController {
     @Param('version') version: string,
     @Param('brokerId') brokerId: string,
     @Query('expectedRevision', ParseIntPipe) expectedRevision: number,
-  ) {
+  ): Promise<any> {
     return this.brokersService.softDeleteBroker(propertyId, version, brokerId, expectedRevision);
   }
 }

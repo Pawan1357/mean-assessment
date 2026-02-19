@@ -1,7 +1,19 @@
-import { Prop, Schema } from '@nestjs/mongoose';
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
-@Schema({ _id: false })
-export class BrokerSchemaClass {
+export type BrokerDocument = HydratedDocument<Broker>;
+
+@Schema({ collection: 'brokers', timestamps: true })
+export class Broker {
+  @Prop({ type: Types.ObjectId, required: true, index: true })
+  propertyVersionId!: Types.ObjectId;
+
+  @Prop({ required: true, index: true })
+  propertyId!: string;
+
+  @Prop({ required: true, index: true })
+  version!: string;
+
   @Prop({ required: true })
   id!: string;
 
@@ -26,3 +38,6 @@ export class BrokerSchemaClass {
   @Prop()
   deletedBy?: string;
 }
+
+export const BrokerSchema = SchemaFactory.createForClass(Broker);
+BrokerSchema.index({ propertyVersionId: 1, id: 1 }, { unique: true });

@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { BrokerRepository } from '../../brokers/repositories/broker.repository';
 import { AppException } from '../../common/exceptions/app.exception';
 import { AuditLogRepository } from '../../properties/repositories/audit-log.repository';
 import { PropertyRepository } from '../../properties/repositories/property.repository';
 import { buildDiff } from '../../properties/utils/diff.util';
 import { TenantDto, UpsertTenantDto } from '../dto/tenant.dto';
+import { TenantRepository } from '../repositories/tenant.repository';
 
 const VACANT_TENANT_ID = 'vacant-row';
 const MOCK_USER = 'mock.user@assessment.local';
@@ -13,38 +15,48 @@ const MOCK_USER = 'mock.user@assessment.local';
 export class TenantsService {
   constructor(
     private readonly propertyRepository: PropertyRepository,
+    private readonly brokerRepository: BrokerRepository,
+    private readonly tenantRepository: TenantRepository,
     private readonly auditRepository: AuditLogRepository,
   ) {}
 
-  async createTenant(propertyId: string, version: string, expectedRevision: number, dto: UpsertTenantDto) {
+  async createTenant(propertyId: string, version: string, expectedRevision: number, dto: UpsertTenantDto): Promise<any> {
     const entity = await this.assertEditableVersion(propertyId, version);
     this.assertRevision(entity.revision, expectedRevision);
 
-    const tenants = [...entity.tenants.filter((t: TenantDto) => !t.isVacant), { ...dto, id: randomUUID(), isVacant: false, isDeleted: false }];
-    return this.updateTenantsForEditableVersion(entity, tenants, 'TENANT_CREATE');
+    const oldTenants = await this.loadTenants(entity);
+    const tenants = [...oldTenants.filter((t) => !t.isVacant), { ...dto, id: randomUUID(), isVacant: false, isDeleted: false }];
+    return this.updateTenantsForEditableVersion(entity, oldTenants, tenants, 'TENANT_CREATE');
   }
 
-  async updateTenant(propertyId: string, version: string, tenantId: string, expectedRevision: number, dto: UpsertTenantDto) {
+  async updateTenant(
+    propertyId: string,
+    version: string,
+    tenantId: string,
+    expectedRevision: number,
+    dto: UpsertTenantDto,
+  ): Promise<any> {
     const entity = await this.assertEditableVersion(propertyId, version);
     this.assertRevision(entity.revision, expectedRevision);
-    this.assertTenantMutable(entity.tenants, tenantId, 'update');
 
-    const tenants = entity.tenants
-      .filter((t: TenantDto) => !t.isVacant)
-      .map((tenant: TenantDto) => (tenant.id === tenantId ? { ...tenant, ...dto } : tenant));
+    const oldTenants = await this.loadTenants(entity);
+    this.assertTenantMutable(oldTenants, tenantId, 'update');
 
-    return this.updateTenantsForEditableVersion(entity, tenants, 'TENANT_UPDATE');
+    const tenants = oldTenants.filter((t) => !t.isVacant).map((tenant) => (tenant.id === tenantId ? { ...tenant, ...dto } : tenant));
+    return this.updateTenantsForEditableVersion(entity, oldTenants, tenants, 'TENANT_UPDATE');
   }
 
-  async softDeleteTenant(propertyId: string, version: string, tenantId: string, expectedRevision: number) {
+  async softDeleteTenant(propertyId: string, version: string, tenantId: string, expectedRevision: number): Promise<any> {
     const entity = await this.assertEditableVersion(propertyId, version);
     this.assertRevision(entity.revision, expectedRevision);
-    this.assertTenantMutable(entity.tenants, tenantId, 'delete');
+
+    const oldTenants = await this.loadTenants(entity);
+    this.assertTenantMutable(oldTenants, tenantId, 'delete');
 
     const now = new Date().toISOString();
-    const tenants = entity.tenants
-      .filter((t: TenantDto) => !t.isVacant)
-      .map((tenant: TenantDto) =>
+    const tenants = oldTenants
+      .filter((t) => !t.isVacant)
+      .map((tenant) =>
         tenant.id === tenantId
           ? {
               ...tenant,
@@ -55,7 +67,15 @@ export class TenantsService {
           : tenant,
       );
 
-    return this.updateTenantsForEditableVersion(entity, tenants, 'TENANT_DELETE_SOFT');
+    return this.updateTenantsForEditableVersion(entity, oldTenants, tenants, 'TENANT_DELETE_SOFT');
+  }
+
+  private async loadTenants(entity: any): Promise<TenantDto[]> {
+    const persisted = await this.tenantRepository.listByPropertyVersionId(entity._id);
+    if (persisted.length > 0) {
+      return persisted.map((item) => this.stripMeta(item));
+    }
+    return Array.isArray(entity.tenants) ? entity.tenants : [];
   }
 
   private assertRevision(currentRevision: number, expectedRevision: number) {
@@ -143,7 +163,7 @@ export class TenantsService {
     return [...activeRows, vacantRow];
   }
 
-  private async updateTenantsForEditableVersion(entity: any, tenants: TenantDto[], action: string) {
+  private async updateTenantsForEditableVersion(entity: any, oldTenants: TenantDto[], tenants: TenantDto[], action: string) {
     const normalized = this.normalizeTenants(tenants, entity.propertyDetails.buildingSizeSf);
     this.validateBusinessRules(
       entity.propertyDetails.buildingSizeSf,
@@ -152,30 +172,42 @@ export class TenantsService {
       normalized,
     );
 
-    return this.updateTenantsWithAudit(entity, normalized, action);
-  }
-
-  private async updateTenantsWithAudit(entity: any, tenants: TenantDto[], action: string) {
-    const updated = await this.propertyRepository.saveCurrentVersionAtomic(entity.propertyId, entity.version, entity.revision, {
-      tenants,
+    const updatedCore = await this.propertyRepository.saveCurrentVersionAtomic(entity.propertyId, entity.version, entity.revision, {
       updatedBy: MOCK_USER,
     });
 
-    if (!updated) {
+    if (!updatedCore) {
       throw new AppException('Revision mismatch detected. Reload latest data.', 'CONFLICT');
     }
 
-    const changes = buildDiff({ tenants: entity.tenants }, { tenants });
+    await this.tenantRepository.replaceByPropertyVersionId(entity._id, entity.propertyId, entity.version, normalized as any);
+    const persistedTenants = await this.loadTenants(entity);
+
+    const changes = buildDiff({ tenants: oldTenants }, { tenants: persistedTenants });
     await this.auditRepository.create({
       propertyId: entity.propertyId,
       version: entity.version,
-      revision: updated.revision,
+      revision: updatedCore.revision,
       updatedBy: MOCK_USER,
       action,
       changes,
       changedFieldCount: changes.length,
     });
 
-    return updated.toObject();
+    return {
+      ...updatedCore.toObject(),
+      brokers: (await this.brokerRepository.listByPropertyVersionId(entity._id)).map((item) => this.stripBrokerMeta(item)),
+      tenants: persistedTenants,
+    };
+  }
+
+  private stripMeta(item: any): TenantDto {
+    const { propertyVersionId, propertyId, version, _id, __v, ...rest } = item;
+    return rest as TenantDto;
+  }
+
+  private stripBrokerMeta(item: any) {
+    const { propertyVersionId, propertyId, version, _id, __v, ...rest } = item;
+    return rest;
   }
 }

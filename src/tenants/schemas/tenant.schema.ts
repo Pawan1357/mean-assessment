@@ -1,7 +1,19 @@
-import { Prop, Schema } from '@nestjs/mongoose';
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
-@Schema({ _id: false })
-export class TenantSchemaClass {
+export type TenantDocument = HydratedDocument<Tenant>;
+
+@Schema({ collection: 'tenants', timestamps: true })
+export class Tenant {
+  @Prop({ type: Types.ObjectId, required: true, index: true })
+  propertyVersionId!: Types.ObjectId;
+
+  @Prop({ required: true, index: true })
+  propertyId!: string;
+
+  @Prop({ required: true, index: true })
+  version!: string;
+
   @Prop({ required: true })
   id!: string;
 
@@ -53,3 +65,6 @@ export class TenantSchemaClass {
   @Prop()
   deletedBy?: string;
 }
+
+export const TenantSchema = SchemaFactory.createForClass(Tenant);
+TenantSchema.index({ propertyVersionId: 1, id: 1 }, { unique: true });

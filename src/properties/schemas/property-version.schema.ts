@@ -1,7 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
-import { BrokerSchemaClass } from '../../brokers/schemas/broker.schema';
-import { TenantSchemaClass } from '../../tenants/schemas/tenant.schema';
 import { PropertyDetailsSchemaClass } from './property-details.schema';
 import { UnderwritingInputsSchemaClass } from './underwriting-inputs.schema';
 
@@ -29,12 +27,6 @@ export class PropertyVersion {
 
   @Prop({ type: UnderwritingInputsSchemaClass, required: true })
   underwritingInputs!: UnderwritingInputsSchemaClass;
-
-  @Prop({ type: [BrokerSchemaClass], required: true, default: [] })
-  brokers!: BrokerSchemaClass[];
-
-  @Prop({ type: [TenantSchemaClass], required: true, default: [] })
-  tenants!: TenantSchemaClass[];
 
   @Prop({ required: true })
   updatedBy!: string;

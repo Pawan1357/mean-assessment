@@ -27,7 +27,7 @@ export class PropertiesController {
     @Param('propertyId') propertyId: string,
     @Param('version') version: string,
     @Body() dto: SavePropertyVersionDto,
-  ) {
+  ): Promise<any> {
     return this.propertiesService.saveCurrentVersion(propertyId, version, dto);
   }
 
@@ -36,7 +36,7 @@ export class PropertiesController {
     @Param('propertyId') propertyId: string,
     @Param('version') version: string,
     @Body() dto: SaveAsVersionDto,
-  ) {
+  ): Promise<any> {
     return this.propertiesService.saveAsNextVersion(propertyId, version, dto);
   }
 }
